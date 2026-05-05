@@ -1,11 +1,14 @@
 -- ================================================================
--- XYLENT - FREEZE BYPASS 2 DETIK (TELEPORT -> FREEZE -> JATUH)
+-- XYLUS - COPY-PASTE TP + ANIMASI + HUMANoid SCALING
 -- ================================================================
 
-local players = game:GetService('Players')
-local lplr = players.LocalPlayer
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local lp = Players.LocalPlayer
+local UIS = game:GetService("UserInputService")
+local RS = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local charactersFolder = workspace:FindFirstChild("Characters") or workspace
 
 local Locations = {
     {"Dealer NPC", Vector3.new(770.992, 3.71, 433.75)},
@@ -22,97 +25,161 @@ local Locations = {
     {"GS MID", Vector3.new(218.427, 3.737, -176.975)}
 }
 
--- ========== BYPASS CORE (FREEZE TOTAL) ==========
-local heartbeatConn = nil
-local propertyConn = nil
-local lastCF = nil
-local bypassActive = false
-local currentRootPart = nil
-
--- Matiin bypass
-local function stopBypass()
-    bypassActive = false
-    if heartbeatConn then heartbeatConn:Disconnect() end
-    if propertyConn then propertyConn:Disconnect() end
-    heartbeatConn = nil
-    propertyConn = nil
-    lastCF = nil
-    currentRootPart = nil
-    print("[BYPASS] Mati - lo mulai jatuh normal")
+-- ========== UTILITY FUNCTIONS ==========
+local function safeClone(instance, parent)
+    local oldArchivable = instance.Archivable
+    instance.Archivable = true
+    local clone = instance:Clone()
+    clone.Parent = parent
+    instance.Archivable = oldArchivable
+    return clone
 end
 
--- Nyalain bypass (FREEZE TOTAL)
-local function startBypass(rootPart)
-    if bypassActive then stopBypass() end
-    
-    bypassActive = true
-    currentRootPart = rootPart
-    lastCF = rootPart.CFrame
-    
-    -- Heartbeat buat nyimpen CFrame
-    heartbeatConn = RunService.Heartbeat:Connect(function()
-        if not bypassActive or not currentRootPart or not currentRootPart.Parent then return end
-        lastCF = currentRootPart.CFrame
-    end)
-    
-    -- PropertyChanged buat nolak setiap perubahan CFrame dari server
-    propertyConn = currentRootPart:GetPropertyChangedSignal("CFrame"):Connect(function()
-        if not bypassActive or not currentRootPart or not currentRootPart.Parent then return end
-        if currentRootPart.CFrame ~= lastCF then
-            currentRootPart.CFrame = lastCF  -- LEMPAR BALIK TERUS
-        end
-    end)
-    
-    print("[BYPASS] FREEZE NYALA - lo gabisa gerak")
+local function destroyIfExisting(instance)
+    if instance and instance.Parent then
+        instance:Destroy()
+    end
 end
 
--- Teleport + freeze 2 detik
-local function teleportAndFreeze(pos)
-    local char = lplr.Character
+-- ========== FORCE HUMANoid SCALING (BIAR POV NORMAL) ==========
+local function fixHumanoidScaling(hum)
+    if not hum then return end
+    
+    -- Enable AutoRotate biar ga aneh
+    hum.AutoRotate = true
+    
+    -- Force platform stand false
+    hum.PlatformStand = false
+    
+    -- Reset CameraMinZoomDistance
+    lp.CameraMinZoomDistance = 0.5
+    lp.CameraMaxZoomDistance = 20
+    
+    -- Force Humanoid state ke Running biar normal
+    hum:ChangeState(Enum.HumanoidStateType.Running)
+    
+    -- Disable disabled states (biar bisa gerak normal)
+    local disabledStates = {"Flying", "Swimming", "Climbing", "FallingDown", "Jumping", "Seated", "PlatformStanding"}
+    for _, state in pairs(disabledStates) do
+        pcall(function()
+            hum:SetStateEnabled(Enum.HumanoidStateType[state], true)
+        end)
+    end
+    
+    print("[SCALE] Humanoid scaling fixed")
+end
+
+-- ========== LOAD ANIMATIONS (DARI SCRIPT LO) ==========
+local AnimationIds = {
+    idle = "http://www.roblox.com/asset/?id=11784200339",
+    walk = "http://www.roblox.com/asset/?id=18644713850",
+    run = "http://www.roblox.com/asset/?id=507767714",
+    swim = "http://www.roblox.com/asset/?id=507784897",
+    swimidle = "http://www.roblox.com/asset/?id=507785072",
+    jump = "http://www.roblox.com/asset/?id=507765000",
+    fall = "http://www.roblox.com/asset/?id=507767968",
+    climb = "http://www.roblox.com/asset/?id=507765644",
+    sit = "http://www.roblox.com/asset/?id=507768133",
+    toolslash = "http://www.roblox.com/asset/?id=507768375",
+    toollunge = "http://www.roblox.com/asset/?id=507768375",
+    wave = "http://www.roblox.com/asset/?id=507770239",
+    dance = "http://www.roblox.com/asset/?id=507771019",
+    dance2 = "http://www.roblox.com/asset/?id=507776043",
+    dance3 = "http://www.roblox.com/asset/?id=507777268",
+    lean = "http://www.roblox.com/asset/?id=11404949032",
+    gunpose = "http://www.roblox.com/asset/?id=14183808901",
+    laugh = "http://www.roblox.com/asset/?id=507770818",
+    cheer = "http://www.roblox.com/asset/?id=507770677",
+    party = "http://www.roblox.com/asset/?id=3333499508",
+    oj = "http://www.roblox.com/asset/?id=3138237587"
+}
+
+local animations = {}
+local currentAnim = nil
+
+local function loadAnimations(hum)
+    local animator = hum:FindFirstChild("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = hum
+    end
+    
+    for name, id in pairs(AnimationIds) do
+        local anim = Instance.new("Animation")
+        anim.AnimationId = id
+        anim.Name = name
+        animations[name] = animator:LoadAnimation(anim)
+    end
+    
+    print("[ANIM] Loaded", #animations, "animations")
+end
+
+local function playAnimation(animName)
+    if currentAnim and currentAnim.IsPlaying then
+        currentAnim:Stop()
+    end
+    local anim = animations[animName]
+    if anim then
+        anim:Play()
+        currentAnim = anim
+    end
+end
+
+-- ========== COPY-PASTE TELEPORT ==========
+local function copyPasteTeleport(pos)
+    local char = lp.Character
     if not char then 
         print("[TP] Gak ada karakter")
         return 
     end
     
     local hum = char:FindFirstChildOfClass("Humanoid")
-    local rootPart = hum and hum.RootPart
-    if not rootPart then 
-        print("[TP] Gak ada root part")
+    if not hum then 
+        print("[TP] Gak ada humanoid")
         return 
     end
     
-    -- 1. Nyalain FREEZE dulu
-    startBypass(rootPart)
-    task.wait(0.05)
+    print("[TP] Cloning character...")
     
-    -- 2. Teleport ke posisi (melayang)
-    rootPart.CFrame = CFrame.new(pos.X, pos.Y + 5, pos.Z)  -- +5 biar di udara
-    lastCF = rootPart.CFrame
+    -- 1. Clone karakter
+    local charCopy = safeClone(char, charactersFolder)
+    charCopy.Name = char.Name
     
-    print("[TP] Teleport + freeze di udara:", pos)
+    -- 2. Teleport clone ke target (tinggi 2 stud biar ga nembus tanah)
+    local targetCF = CFrame.new(pos.X, pos.Y + 2, pos.Z)
+    charCopy:SetPrimaryPartCFrame(targetCF)
     
-    -- 3. Biarin freeze 2 detik (server terpaksa save posisi ini)
-    task.wait(2)
+    -- 3. Setup Humanoid clone
+    local newHum = charCopy:FindFirstChildOfClass("Humanoid")
+    if newHum then
+        -- Load animasi
+        loadAnimations(newHum)
+        playAnimation("idle")
+        
+        -- Fix scaling
+        fixHumanoidScaling(newHum)
+    end
     
-    -- 4. Matiin bypass, lo bakal jatuh ke tanah
-    stopBypass()
+    -- 4. Set sebagai karakter player
+    lp.Character = charCopy
     
-    print("[TP] Bypass mati, sekarang jatuh bebas - GA ADA SETBACK!")
+    -- 5. Hapus karakter asli
+    task.wait(0.1)
+    destroyIfExisting(char)
+    
+    -- 6. Fix camera
+    local rootPart = charCopy:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        workspace.CurrentCamera.CameraSubject = rootPart
+    end
+    
+    print("[TP] Copy-paste teleport ke:", pos.X, pos.Y, pos.Z)
 end
-
--- ========== INIT ==========
-lplr.CharacterAdded:Connect(function()
-    stopBypass()
-end)
-
-lplr.CharacterRemoving:Connect(function()
-    stopBypass()
-end)
 
 -- ========== GUI ==========
 local gui = Instance.new("ScreenGui")
-gui.Name = "XylusFreezeTP"
-gui.Parent = lplr:WaitForChild("PlayerGui")
+gui.Name = "CopyPasteAnimTP"
+gui.Parent = lp:WaitForChild("PlayerGui")
 gui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame")
@@ -129,18 +196,17 @@ corner.CornerRadius = UDim.new(0, 10)
 corner.Parent = frame
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 35)
+title.Size = UDim2.new(1, 0, 0, 40)
 title.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-title.BackgroundTransparency = 0.2
-title.Text = "XYLUS TP (FREEZE 2 DETIK)"
+title.Text = "XYLUS | COPY-PASTE TP"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 12
+title.TextSize = 14
 title.Font = Enum.Font.GothamBold
 title.Parent = frame
 
 local close = Instance.new("TextButton")
-close.Size = UDim2.new(0, 35, 0, 35)
-close.Position = UDim2.new(1, -35, 0, 0)
+close.Size = UDim2.new(0, 40, 0, 40)
+close.Position = UDim2.new(1, -40, 0, 0)
 close.BackgroundTransparency = 1
 close.Text = "X"
 close.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -149,10 +215,11 @@ close.Parent = title
 close.MouseButton1Click:Connect(function() gui:Destroy() end)
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -10, 1, -45)
-scroll.Position = UDim2.new(0, 5, 0, 40)
+scroll.Size = UDim2.new(1, -10, 1, -50)
+scroll.Position = UDim2.new(0, 5, 0, 45)
 scroll.BackgroundTransparency = 1
 scroll.CanvasSize = UDim2.new(0, 0, 0, #Locations * 45)
+scroll.ScrollBarThickness = 3
 scroll.Parent = frame
 
 local layout = Instance.new("UIListLayout")
@@ -165,7 +232,7 @@ for _, loc in pairs(Locations) do
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
     btn.Text = loc[1]
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 12
+    btn.TextSize = 13
     btn.Font = Enum.Font.GothamSemibold
     btn.Parent = scroll
     
@@ -174,16 +241,15 @@ for _, loc in pairs(Locations) do
     btnCorner.Parent = btn
     
     btn.MouseButton1Click:Connect(function()
-        teleportAndFreeze(loc[2])
+        copyPasteTeleport(loc[2])
     end)
 end
 
-UserInputService.InputBegan:Connect(function(input)
+UIS.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.Insert then
         frame.Visible = not frame.Visible
     end
 end)
 
-print("[XYLUS] FREEZE BYPASS 2 DETIK LOADED - Tekan Insert")
-print("[XYLUS] Teleport -> freeze 2 detik -> mati bypass -> jatuh normal")
-print("[XYLUS] GA ADA SETBACK, GA ADA FREEZE BERKEPANJANGAN!")
+print("[XYLUS] COPY-PASTE TP + ANIMASI + SCALING LOADED")
+print("[XYLUS] Tekan INSERT untuk toggle GUI")
