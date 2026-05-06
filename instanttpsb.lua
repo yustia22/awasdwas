@@ -1,11 +1,10 @@
 -- ================================================================
--- XYLUS - COPY-PASTE TP + ANIMASI + HUMANoid SCALING
+-- xylent
 -- ================================================================
 
 local Players = game:GetService("Players")
 local lp = Players.LocalPlayer
 local UIS = game:GetService("UserInputService")
-local RS = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local charactersFolder = workspace:FindFirstChild("Characters") or workspace
@@ -25,7 +24,9 @@ local Locations = {
     {"GS MID", Vector3.new(218.427, 3.737, -176.975)}
 }
 
--- ========== UTILITY FUNCTIONS ==========
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
+local checkCharacter = remoteEvents and remoteEvents:FindFirstChild("CheckCharacter")
+
 local function safeClone(instance, parent)
     local oldArchivable = instance.Archivable
     instance.Archivable = true
@@ -41,144 +42,137 @@ local function destroyIfExisting(instance)
     end
 end
 
--- ========== FORCE HUMANoid SCALING (BIAR POV NORMAL) ==========
-local function fixHumanoidScaling(hum)
-    if not hum then return end
-    
-    -- Enable AutoRotate biar ga aneh
-    hum.AutoRotate = true
-    
-    -- Force platform stand false
-    hum.PlatformStand = false
-    
-    -- Reset CameraMinZoomDistance
-    lp.CameraMinZoomDistance = 0.5
-    lp.CameraMaxZoomDistance = 20
-    
-    -- Force Humanoid state ke Running biar normal
-    hum:ChangeState(Enum.HumanoidStateType.Running)
-    
-    -- Disable disabled states (biar bisa gerak normal)
-    local disabledStates = {"Flying", "Swimming", "Climbing", "FallingDown", "Jumping", "Seated", "PlatformStanding"}
-    for _, state in pairs(disabledStates) do
+local function fireCheckCharacter()
+    if checkCharacter then
         pcall(function()
-            hum:SetStateEnabled(Enum.HumanoidStateType[state], true)
+            checkCharacter:FireServer(lp.Character)
+            print("[SYNC] CheckCharacter fired")
         end)
     end
-    
-    print("[SCALE] Humanoid scaling fixed")
 end
 
--- ========== LOAD ANIMATIONS (DARI SCRIPT LO) ==========
-local AnimationIds = {
-    idle = "http://www.roblox.com/asset/?id=11784200339",
-    walk = "http://www.roblox.com/asset/?id=18644713850",
-    run = "http://www.roblox.com/asset/?id=507767714",
-    swim = "http://www.roblox.com/asset/?id=507784897",
-    swimidle = "http://www.roblox.com/asset/?id=507785072",
-    jump = "http://www.roblox.com/asset/?id=507765000",
-    fall = "http://www.roblox.com/asset/?id=507767968",
-    climb = "http://www.roblox.com/asset/?id=507765644",
-    sit = "http://www.roblox.com/asset/?id=507768133",
-    toolslash = "http://www.roblox.com/asset/?id=507768375",
-    toollunge = "http://www.roblox.com/asset/?id=507768375",
-    wave = "http://www.roblox.com/asset/?id=507770239",
-    dance = "http://www.roblox.com/asset/?id=507771019",
-    dance2 = "http://www.roblox.com/asset/?id=507776043",
-    dance3 = "http://www.roblox.com/asset/?id=507777268",
-    lean = "http://www.roblox.com/asset/?id=11404949032",
-    gunpose = "http://www.roblox.com/asset/?id=14183808901",
-    laugh = "http://www.roblox.com/asset/?id=507770818",
-    cheer = "http://www.roblox.com/asset/?id=507770677",
-    party = "http://www.roblox.com/asset/?id=3333499508",
-    oj = "http://www.roblox.com/asset/?id=3138237587"
-}
+local function fixCamera(charCopy)
+    pcall(function()
+        local root = charCopy:FindFirstChild("HumanoidRootPart")
+        local hum = charCopy:FindFirstChildOfClass("Humanoid")
+        local cam = workspace.CurrentCamera
 
-local animations = {}
-local currentAnim = nil
+        -- Set subject
+        cam.CameraSubject = hum or root
+        cam.CameraType = Enum.CameraType.Custom
 
-local function loadAnimations(hum)
-    local animator = hum:FindFirstChild("Animator")
-    if not animator then
-        animator = Instance.new("Animator")
-        animator.Parent = hum
-    end
-    
-    for name, id in pairs(AnimationIds) do
-        local anim = Instance.new("Animation")
-        anim.AnimationId = id
-        anim.Name = name
-        animations[name] = animator:LoadAnimation(anim)
-    end
-    
-    print("[ANIM] Loaded", #animations, "animations")
+        -- Force camera to snap to new character position
+        if root then
+            cam.CFrame = CFrame.new(root.Position + Vector3.new(0, 2, 6), root.Position)
+        end
+
+        task.wait(0.05)
+
+        -- Re-set subject after snap so it follows normally
+        cam.CameraSubject = hum or root
+    end)
 end
 
-local function playAnimation(animName)
-    if currentAnim and currentAnim.IsPlaying then
-        currentAnim:Stop()
-    end
-    local anim = animations[animName]
-    if anim then
-        anim:Play()
-        currentAnim = anim
-    end
+local function reloadAnims(charCopy)
+    pcall(function()
+        local hum = charCopy:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+
+        -- Stop semua track yang lagi main dulu
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator then
+            for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+                track:Stop(0)
+            end
+        end
+
+        -- Restart Animate script (ini yang drive idle/walk/run)
+        local animScript = charCopy:FindFirstChild("Animate")
+        if animScript then
+            animScript.Disabled = true
+            task.wait(0.05)
+            animScript.Disabled = false
+            print("[ANIM] Animate script restarted")
+        else
+            print("[ANIM] Animate script not found, forcing state")
+        end
+
+        -- Force humanoid state biar trigger idle
+        task.wait(0.1)
+        hum:ChangeState(Enum.HumanoidStateType.Landed)
+        task.wait(0.05)
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end)
 end
 
--- ========== COPY-PASTE TELEPORT ==========
+local isTeleporting = false
+
 local function copyPasteTeleport(pos)
+    if isTeleporting then return end
+    isTeleporting = true
+
     local char = lp.Character
-    if not char then 
-        print("[TP] Gak ada karakter")
-        return 
+    if not char then
+        isTeleporting = false
+        return
     end
-    
+
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then 
-        print("[TP] Gak ada humanoid")
-        return 
+    if not hum then
+        isTeleporting = false
+        return
     end
-    
+
     print("[TP] Cloning character...")
-    
-    -- 1. Clone karakter
+
     local charCopy = safeClone(char, charactersFolder)
     charCopy.Name = char.Name
-    
-    -- 2. Teleport clone ke target (tinggi 2 stud biar ga nembus tanah)
-    local targetCF = CFrame.new(pos.X, pos.Y + 2, pos.Z)
-    charCopy:SetPrimaryPartCFrame(targetCF)
-    
-    -- 3. Setup Humanoid clone
+
+    -- Pindah posisi via root CFrame langsung (no SetPrimaryPartCFrame)
+    local rootCopy = charCopy:FindFirstChild("HumanoidRootPart")
+    if rootCopy then
+        rootCopy.CFrame = CFrame.new(pos.X, pos.Y + 3, pos.Z)
+    end
+
+    -- Setup humanoid clone
     local newHum = charCopy:FindFirstChildOfClass("Humanoid")
     if newHum then
-        -- Load animasi
-        loadAnimations(newHum)
-        playAnimation("idle")
-        
-        -- Fix scaling
-        fixHumanoidScaling(newHum)
+        newHum.Health = newHum.MaxHealth
+        newHum.PlatformStand = false
+        newHum.Sit = false
     end
-    
-    -- 4. Set sebagai karakter player
+
+    -- Swap karakter
     lp.Character = charCopy
-    
-    -- 5. Hapus karakter asli
     task.wait(0.1)
+
+    -- Hapus karakter lama
     destroyIfExisting(char)
-    
-    -- 6. Fix camera
-    local rootPart = charCopy:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        workspace.CurrentCamera.CameraSubject = rootPart
-    end
-    
-    print("[TP] Copy-paste teleport ke:", pos.X, pos.Y, pos.Z)
+
+    -- Fix POV / kamera
+    fixCamera(charCopy)
+
+    -- Fire sync ke server
+    task.wait(0.05)
+    fireCheckCharacter()
+
+    -- Reload animasi
+    reloadAnims(charCopy)
+
+    -- Fix kamera lagi setelah anim load biar subject ga lepas
+    task.wait(0.15)
+    fixCamera(charCopy)
+
+    print("[TP] Selesai ke:", pos.X, pos.Y, pos.Z)
+    isTeleporting = false
 end
 
--- ========== GUI ==========
+-- ================================================================
+-- GUI
+-- ================================================================
+
 local gui = Instance.new("ScreenGui")
-gui.Name = "CopyPasteAnimTP"
+gui.Name = "xylent.tp"
 gui.Parent = lp:WaitForChild("PlayerGui")
 gui.ResetOnSpawn = false
 
@@ -196,30 +190,38 @@ corner.CornerRadius = UDim.new(0, 10)
 corner.Parent = frame
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Size = UDim2.new(1, 0, 0, 35)
 title.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-title.Text = "XYLUS | COPY-PASTE TP"
+title.Text = "xylent.tp"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 14
 title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+title.BorderSizePixel = 0
 title.Parent = frame
 
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = title
+
 local close = Instance.new("TextButton")
-close.Size = UDim2.new(0, 40, 0, 40)
-close.Position = UDim2.new(1, -40, 0, 0)
+close.Size = UDim2.new(0, 35, 0, 35)
+close.Position = UDim2.new(1, -35, 0, 0)
 close.BackgroundTransparency = 1
 close.Text = "X"
 close.TextColor3 = Color3.fromRGB(255, 100, 100)
 close.TextSize = 18
+close.Font = Enum.Font.GothamBold
 close.Parent = title
 close.MouseButton1Click:Connect(function() gui:Destroy() end)
 
 local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -10, 1, -50)
-scroll.Position = UDim2.new(0, 5, 0, 45)
+scroll.Size = UDim2.new(1, -10, 1, -45)
+scroll.Position = UDim2.new(0, 5, 0, 40)
 scroll.BackgroundTransparency = 1
 scroll.CanvasSize = UDim2.new(0, 0, 0, #Locations * 45)
-scroll.ScrollBarThickness = 3
+scroll.ScrollBarThickness = 4
+scroll.ScrollBarImageColor3 = Color3.fromRGB(200, 50, 50)
+scroll.BorderSizePixel = 0
 scroll.Parent = frame
 
 local layout = Instance.new("UIListLayout")
@@ -232,24 +234,32 @@ for _, loc in pairs(Locations) do
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
     btn.Text = loc[1]
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 13
-    btn.Font = Enum.Font.GothamSemibold
+    btn.Font = Enum.Font.Gotham
+    btn.TextScaled = true
+    btn.BorderSizePixel = 0
     btn.Parent = scroll
-    
+
     local btnCorner = Instance.new("UICorner")
     btnCorner.CornerRadius = UDim.new(0, 6)
     btnCorner.Parent = btn
-    
+
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(65, 65, 85)
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+    end)
+
     btn.MouseButton1Click:Connect(function()
         copyPasteTeleport(loc[2])
     end)
 end
 
-UIS.InputBegan:Connect(function(input)
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
     if input.KeyCode == Enum.KeyCode.Insert then
         frame.Visible = not frame.Visible
     end
 end)
 
-print("[XYLUS] COPY-PASTE TP + ANIMASI + SCALING LOADED")
-print("[XYLUS] Tekan INSERT untuk toggle GUI")
+print("xylent on top")
