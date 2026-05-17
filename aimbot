@@ -1,0 +1,63 @@
+local mmMethod = nil
+    pcall(function()
+        if mousemoverel then mmMethod = "rel" end
+    end)
+    local function moveRel(dx, dy)
+        if mmMethod == "rel" then
+            mousemoverel(dx, dy)
+        else
+            local mmp = UserInputService:GetMouseLocation()
+            pcall(function()
+                VIM:SendMouseMoveEvent(mmp.X + dx, mmp.Y + dy, false)
+            end)
+        end
+    end
+
+    local _fpX, _fpY, _fRC = 0, 0, 250
+    RunService:BindToRenderStep("PhantomAimbot", 201, function(dt)
+        local vs = Camera.ViewportSize
+        local mp = UserInputService:GetMouseLocation()
+        local tcX = S.aimMode == "FreeAim" and mp.X or vs.X * 0.5
+        local tcY = S.aimMode == "FreeAim" and mp.Y or vs.Y * 0.5
+        if _fpX == 0 then _fpX = tcX end
+        if _fpY == 0 then _fpY = tcY end
+        local fL = math.clamp(dt * 40, 0, 1)
+        _fpX = _fpX + (tcX - _fpX) * fL
+        _fpY = _fpY + (tcY - _fpY) * fL
+        _fRC = _fRC + (S.aimFOV - _fRC) * fL
+        if aimCircle then
+            aimCircle.Position = Vector2.new(_fpX, _fpY)
+            aimCircle.Radius = _fRC
+            aimCircle.Color = S.aimFovCol
+            aimCircle.Visible = S.aimOn
+        end
+        if not shouldAim() then return end
+        local target, tPlr = getBestTarget()
+        if not target then return end
+        local pos = getPredPos(target, tPlr)
+        if S.aimMode == "Camera" then
+            local cf = Camera.CFrame
+            local goal = CFrame.new(cf.Position, pos)
+            if S.aimSmooth <= 0 then
+                Camera.CFrame = goal
+            else
+                local f = math.clamp(1 - S.aimSmooth / 20, 0.05, 0.95)
+                local t = math.clamp(1 - (1 - f) ^ (dt / 0.016), 0.02, 1)
+                Camera.CFrame = cf:Lerp(goal, t)
+            end
+        else
+            local sp = Camera:WorldToViewportPoint(pos)
+            if sp.Z <= 0 then return end
+            local mmp = UserInputService:GetMouseLocation()
+            local dx = sp.X - mmp.X
+            local dy = sp.Y - mmp.Y
+            if S.aimSmooth <= 0 then
+                moveRel(dx, dy)
+            else
+                local f = math.clamp(1 - S.aimSmooth / 20, 0.05, 0.95)
+                local t = math.clamp(1 - (1 - f) ^ (dt / 0.016), 0.02, 1)
+                moveRel(dx * t, dy * t)
+            end
+        end
+    end)
+end
