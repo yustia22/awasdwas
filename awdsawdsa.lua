@@ -3138,10 +3138,7 @@ if not HumanoidRootPart then return end
 
                     local Items = {"Gelatin", "Sugar Block Bag", "Water"}
 
-                    while not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") do
-    task.wait(0.1)
-end
-Config.Teleport("Force", CFrame.new(510, 4, 602))
+                    Config.Teleport("Force", CFrame.new(510, 4, 602))
                     
                     for Index, Value in Items do
                         for _ = 1, Marshmellow_Increment do
